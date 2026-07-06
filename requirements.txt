@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+streamlit
+opencv-python
+scikit-image
+scipy
+pymupdf
+paddleocr
+easyocr
+groq
+numpy
+pillow
+python-multipart
+requests
+reportlab

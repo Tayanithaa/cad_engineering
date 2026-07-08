@@ -1,65 +1,57 @@
-# CAD Drawing Revision Comparator
+# CAD Elevation Drawing Revision Comparator
 
-An engineering-grade revision comparison engine for architectural CAD drawings (PDFs or raster images). 
+Python application for comparing two architectural elevation drawings. It ingests PDF/JPG/PNG files, crops drawing borders, aligns revisions with ORB-first/SIFT-fallback homography, computes SSIM structural differences, classifies changed regions with deterministic geometry rules, optionally OCRs text-bearing regions, and produces a single self-contained HTML report.
 
-The system operates like professional BIM / Autodesk revision tools, upgrading traditional pixel difference tracking to **semantic CAD object matching** with extreme precision, memory safeguards, and low false positive rates.
+## Setup
 
----
-
-## Technical Pipeline
-
-### 1. Ingestion & Scale Capping (`ingestion.py`)
-- Decodes image uploads and renders vector PDFs at a fixed DPI.
-- **Memory Safety Safeguard:** Pre-calculates scale constraints to cap dimensions at a maximum of `2000px`. This keeps color image footprints under ~12MB, preventing out-of-memory errors on large sheets.
-
-### 2. Drawing Region Crop (`diff.py`)
-- Automatically analyzes horizontal and vertical line projections to locate drawing borders, title blocks, revision tables, logos, and margins.
-- Crops the comparison target to focus purely on the architectural floor plan.
-
-### 3. Image Alignment (`alignment.py`)
-- Uses SIFT feature detection, FLANN keypoint matching, and RANSAC estimation to calculate scale differences and perspective warp drawing revisions into a unified coordinate frame.
-
-### 4. CAD Object Detection (`diff.py` & `ocr_extraction.py`)
-- Extracts text elements using a single-pass full-sheet OCR scan (`extract_full_image_ocr`).
-- Groups lines, contours, and OCR elements into high-level architectural categories:
-  - **Walls:** Parallel double-line pairs with typical wall spacing (10–25px) and minimum structural lengths (80px), filtering out hatching lines.
-  - **Doors:** Curved swing-arcs/frames.
-  - **Windows:** Close parallel window frame lines.
-  - **Columns:** Circular or square solid structural contours.
-  - **Staircases:** Multi-step closely spaced parallel vectors.
-  - **Dimensions & Text Labels:** Dimension labels and annotation notes.
-
-### 5. Weighted Hungarian Object Matching (`diff.py`)
-- Computes a global bipartite matching between drawings using the **Hungarian Assignment Algorithm** (`scipy.optimize.linear_sum_assignment`).
-- Pairings are optimized based on a weighted 5-parameter similarity metric:
-  - **40% Geometry** (dimension/label text values, length profiles)
-  - **25% Position** (centroid distance)
-  - **15% Orientation** (angle alignment)
-  - **10% Shape** (bounding box aspect ratio)
-  - **10% Topology** (bounding box Intersection-over-Union)
-- **High-Density Fallback:** Gracefully falls back to a localized nearest-neighbor search if a category contains over 150 elements to prevent $O(N^3)$ computational bottlenecks.
-
-### 6. False Positive Suppression & Revision Capping
-- Ignores micro-translations under 15 pixels and dimensional variations under 15% (which represent normal anti-aliasing, rasterization, or DPI differences).
-- Limits output visualizations to the top **25** most significant engineering changes, sorting by component type and severity of alteration.
-
-### 7. Overlays & Reports (`report.py`)
-- Generates clean overlays showing only changed components color-coded:
-  - **Green:** Added
-  - **Red:** Removed
-  - **Yellow:** Modified
-  - **Blue:** Shifted
-- Computes an engineering change log table and change-density heatmap.
-- Packages findings into a downloadable HTML or PDF report, complete with a single-call Llama-3 (Groq) AI design overview.
-
----
-
-## How to Run
-
-Initialize the Streamlit server locally:
-
-```bash
-streamlit run app.py --server.port 5000 --server.address 0.0.0.0
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 ```
 
-*Note: Ensure your `GROQ_API_KEY` is specified in your `.env` file to support the AI summary feature.*
+## Environment Secrets
+
+Set `GROQ_API_KEY` only when you want the final natural-language summary. The report still renders if the Groq call fails or the key is absent.
+
+```powershell
+$env:GROQ_API_KEY="your_api_key"
+$env:GROQ_TEXT_MODEL="llama-3.3-70b-versatile"
+```
+
+`GROQ_TEXT_MODEL` is read from the environment and defaults to `llama-3.3-70b-versatile`. Before running production comparisons, verify current Groq model availability at [Groq supported models](https://console.groq.com/docs/models), because model IDs can change.
+
+## Run Streamlit UI
+
+```powershell
+streamlit run app.py
+```
+
+The UI provides two uploaders, a Compare button, stage-by-stage progress, inline report rendering, and a downloadable HTML report.
+
+## Optional FastAPI Backend
+
+The FastAPI app is exposed as `main:api`.
+
+```powershell
+uvicorn main:api --reload
+```
+
+`POST /compare` accepts JSON with base64-encoded `drawing_a_base64`, `drawing_b_base64`, `filename_a`, and `filename_b`.
+
+## Pipeline Stages
+
+1. Ingestion via `ingestion.py`, with PDFs rendered at fixed 300 DPI.
+2. Border crop via `preprocess.py`.
+3. Alignment via `alignment.py`, using ORB first and SIFT fallback when match quality is poor.
+4. SSIM diff via `diff.py`.
+5. Thresholding and contour extraction via `diff.py`.
+6. Geometry classification via `element_classification.py`.
+7. OCR extraction via `ocr_extraction.py`, using PaddleOCR by default or EasyOCR via `CAD_COMPARE_OCR_ENGINE=easyocr`.
+8. Compare and merge via `compare.py` and `merge.py`.
+9. Visualization via `visualize.py`.
+10. HTML report, table, thumbnails, and statistics via `report.py`.
+11. One final Groq text-only call via `ai_summary.py`.
+12. Streamlit and optional FastAPI orchestration via `app.py`.
+
+All thresholds are centralized in `config.py`.
